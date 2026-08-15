@@ -8,9 +8,8 @@ WORKDIR /build
 COPY requirements.txt .
 
 RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
-
 
 # =========================
 # Stage 2: Production
