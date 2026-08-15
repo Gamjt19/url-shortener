@@ -10,8 +10,6 @@ from .models import URL
 from .redis_client import redis_client
 from .schemas import URLCreate, URLResponse, URLStats
 
-
-
 app = FastAPI(
     title="URL Shortener API",
     version="1.0.0",
