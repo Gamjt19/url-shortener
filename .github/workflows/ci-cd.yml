@@ -147,25 +147,6 @@ jobs:
         run: |
           docker load -i url-shortener.tar
 
-      # Temporary diagnostic step
-      - name: Inspect installed Python packages
-        run: |
-          docker run --rm \
-            url-shortener:${{ github.sha }} \
-            python -m pip list
-
-      - name: Check setuptools version
-        run: |
-          docker run --rm \
-            url-shortener:${{ github.sha }} \
-            python -m pip show setuptools
-
-      - name: Check msgpack
-        run: |
-          docker run --rm \
-            url-shortener:${{ github.sha }} \
-            python -m pip show msgpack || true
-
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
