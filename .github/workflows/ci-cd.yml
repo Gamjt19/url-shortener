@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
 
   pull_request:
     branches:
@@ -16,15 +14,42 @@ env:
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/url-shortener
 
 
+# ============================================================
+# 1. CHECKOUT
+# ============================================================
 jobs:
 
-  lint:
-    name: Lint
+  checkout:
+    name: Checkout
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Upload source code
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-code
+          path: .
+          include-hidden-files: true
+
+
+  # ============================================================
+  # 2. LINT
+  # ============================================================
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+
+    needs: checkout
+
+    steps:
+      - name: Download source code
+        uses: actions/download-artifact@v4
+        with:
+          name: source-code
+          path: .
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,15 +63,21 @@ jobs:
         run: ruff check app tests
 
 
+  # ============================================================
+  # 3. UNIT TEST
+  # ============================================================
   test:
-    name: Unit Tests
+    name: Unit Test
     runs-on: ubuntu-24.04
 
     needs: lint
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download source code
+        uses: actions/download-artifact@v4
+        with:
+          name: source-code
+          path: .
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -56,19 +87,25 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run pytest
         run: pytest -v
 
 
+  # ============================================================
+  # 4. BUILD DOCKER IMAGE
+  # ============================================================
   build:
-    name: Build and Scan Docker Image
+    name: Build Docker Image
     runs-on: ubuntu-24.04
 
     needs: test
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download source code
+        uses: actions/download-artifact@v4
+        with:
+          name: source-code
+          path: .
 
       - name: Build Docker image
         run: |
@@ -76,7 +113,42 @@ jobs:
             -t url-shortener:${{ github.sha }} \
             .
 
-      - name: Scan Docker image
+      - name: Save Docker image
+        run: |
+          docker save \
+            url-shortener:${{ github.sha }} \
+            -o url-shortener.tar
+
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: url-shortener.tar
+          retention-days: 1
+
+
+  # ============================================================
+  # 5. SCAN IMAGE
+  # ============================================================
+  scan:
+    name: Scan Image
+    runs-on: ubuntu-24.04
+
+    needs: build
+
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: .
+
+      - name: Load Docker image
+        run: |
+          docker load \
+            -i url-shortener.tar
+
+      - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: url-shortener:${{ github.sha }}
@@ -87,28 +159,54 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
 
+
+  # ============================================================
+  # 6. PUSH DOCKER HUB
+  # ============================================================
+  push:
+    name: Push Docker Hub
+    runs-on: ubuntu-24.04
+
+    needs: scan
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: .
+
+      - name: Load Docker image
+        run: |
+          docker load \
+            -i url-shortener.tar
+
       - name: Log in to Docker Hub
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Tag Docker image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Tag v1.0
         run: |
-          docker tag url-shortener:${{ github.sha }} \
+          docker tag \
+            url-shortener:${{ github.sha }} \
+            ${{ env.IMAGE_NAME }}:v1.0
+
+      - name: Tag latest
+        run: |
+          docker tag \
+            url-shortener:${{ github.sha }} \
             ${{ env.IMAGE_NAME }}:latest
 
-          docker tag url-shortener:${{ github.sha }} \
+      - name: Push v1.0
+        run: |
+          docker push \
             ${{ env.IMAGE_NAME }}:v1.0
 
       - name: Push latest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push ${{ env.IMAGE_NAME }}:latest
-
-      - name: Push v1.0
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          docker push ${{ env.IMAGE_NAME }}:v1.0
+          docker push \
+            ${{ env.IMAGE_NAME }}:latest
